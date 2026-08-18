@@ -5042,7 +5042,7 @@ var EnergyCardEditor = class extends HTMLElement {
 };
 
 // energy-card/energy-card.js
-var VERSION = "1.2.0";
+var VERSION = "1.0.0";
 if (!customElements.get("energy-card")) {
   customElements.define("energy-card", EnergyCard);
 }

@@ -1,6 +1,6 @@
 {
   "name": "energy-card",
-  "version": "1.2.0",
+  "version": "1.0.0",
   "description": "Der Pulse-Screen der Tibber-App als Lovelace-Karte für Home Assistant",
   "private": true,
   "type": "module",
