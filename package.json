@@ -1,0 +1,14 @@
+{
+  "name": "energy-card",
+  "version": "1.2.0",
+  "description": "Der Pulse-Screen der Tibber-App als Lovelace-Karte für Home Assistant",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild energy-card/energy-card.js --bundle --format=esm --target=es2022 --legal-comments=inline --outfile=dist/energy-card.js",
+    "check": "node --check energy-card/energy-card.js && node --check dist/energy-card.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

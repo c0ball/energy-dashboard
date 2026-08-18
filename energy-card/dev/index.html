@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>energy-card — Entwicklung</title>
+  <style>
+    :root { color-scheme: dark light; }
+    body {
+      margin: 0;
+      padding: 20px 16px 60px;
+      background: #0B0B0C;
+      font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+      color: #fff;
+      /* Home Assistant vererbt diese Variablen an die Karte — die
+         Themenerkennung hängt daran. */
+      --primary-text-color: #E1E1E1;
+    }
+    body.light {
+      background: #F0F1F3;
+      color: #212121;
+      --primary-text-color: #212121;
+    }
+    .toolbar {
+      margin: 0 auto 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      font-size: 13px;
+      opacity: 0.85;
+    }
+    .toolbar span.group { margin-left: 10px; opacity: 0.6; }
+    .toolbar a, .toolbar button {
+      appearance: none;
+      background: rgba(128, 128, 128, 0.16);
+      color: inherit;
+      border: 1px solid rgba(128, 128, 128, 0.35);
+      border-radius: 999px;
+      padding: 4px 11px;
+      font: inherit;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .toolbar a.active { border-color: #3ED2AC; color: #3ED2AC; }
+    .stage { margin: 0 auto; }
+    ha-card { display: block; }
+  </style>
+</head>
+<body>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="stage" id="stage"></div>
+
+  <script type="module">
+    import { createMockHass } from "./mock-hass.js";
+
+    /* Mit ?bundle=1 wird statt der Quellmodule das gebaute Bündel geladen.
+       So laufen dieselben Prüfungen gegen genau das Artefakt, das HACS
+       ausliefert — ein Bündel, das anders funktioniert als die Quelle, fiele
+       sonst erst beim Nutzer auf. */
+    const bundle = new URLSearchParams(location.search).get("bundle") === "1";
+    await import(bundle ? "../../dist/energy-card.js" : "../energy-card.js");
+
+    // <ha-card> gibt es hier nicht — ein neutrales Element genügt, die Karte
+    // bringt ihr eigenes Aussehen mit.
+    if (!customElements.get("ha-card")) {
+      customElements.define("ha-card", class extends HTMLElement {});
+    }
+
+    const params = new URLSearchParams(location.search);
+    const opts = {
+      scenario: params.get("scenario") || "low",
+      lang: params.get("lang") || "de",
+      theme: params.get("theme") || "dark",
+      w: params.get("w") || "430",
+      band: params.get("band") !== "0",
+      panel: params.get("panel") === "1",
+      live: params.get("live") !== "0",
+      today: params.get("today") === "1",
+      range: params.get("range") || "",
+      view: params.get("view") || "live",
+      level: params.get("level") || "",
+      range0: params.get("range0") || "",
+      compare: params.get("compare") !== "0",
+      cost: params.get("cost") || "stat",
+    };
+    // Feste Uhrzeit ermöglicht reproduzierbare Screenshots
+    const fixed = params.get("t");
+    const now = fixed ? Date.parse(fixed) : Date.now();
+
+    /* Bedienleiste */
+    const groups = [
+      ["Last", "scenario", [["low", "niedrig"], ["high", "hoch"]]],
+      ["Sprache", "lang", [["de", "de"], ["en", "en"]]],
+      ["Thema", "theme", [["dark", "dunkel"], ["light", "hell"]]],
+      ["Breite", "w", [["430", "Handy"], ["800", "Tablet"], ["1200", "Desktop"]]],
+      ["Panel", "panel", [["0", "aus"], ["1", "an"]]],
+      ["Zeiträume", "range", [
+        ["", "Standard"],
+        ["5min,1h,6h,12h,24h,7d,30d", "mit 6/12 Std"],
+      ]],
+      ["Ansicht", "view", [["live", "Live"], ["tabs", "Reiter"], ["analysis", "Analyse"]]],
+      ["Startebene", "level", [
+        ["", "Vorgabe"], ["day", "Tag"], ["week", "Woche"],
+        ["month", "Monat"], ["year", "Jahr"],
+      ]],
+      ["Startzeitraum", "range0", [
+        ["", "Vorgabe"], ["5min", "5 Min"], ["1h", "1 Std"],
+        ["24h", "24 Std"], ["7d", "7 T"], ["30d", "30 T"],
+      ]],
+      ["Preisquelle", "cost", [
+        ["stat", "Kostenstatistik"], ["fixed", "fester Preis"], ["none", "keine"],
+      ]],
+    ];
+    const toolbar = document.getElementById("toolbar");
+    for (const [title, key, values] of groups) {
+      const label = document.createElement("span");
+      label.className = "group";
+      label.textContent = `${title}:`;
+      toolbar.appendChild(label);
+      for (const [value, text] of values) {
+        const next = new URLSearchParams(location.search);
+        next.set(key, value);
+        const link = document.createElement("a");
+        link.href = `?${next}`;
+        link.textContent = text;
+        const current = typeof opts[key] === "boolean" ? (opts[key] ? "1" : "0") : opts[key];
+        link.classList.toggle("active", current === value);
+        toolbar.appendChild(link);
+      }
+    }
+
+    document.body.classList.toggle("light", opts.theme === "light");
+    const stage = document.getElementById("stage");
+    stage.style.maxWidth = `${opts.w}px`;
+
+    // Die Panel-Ansicht von Home Assistant gibt der Karte eine feste Höhe
+    // (dort `height: 100%`) — hier nachgestellt, um das Strecken zu prüfen.
+    if (opts.panel) {
+      stage.style.height = "calc(100vh - 90px)";
+      document.body.style.paddingBottom = "12px";
+    }
+
+    // Mit ?start=2026-08-01 lässt sich ein frisch aufgesetzter Zähler
+    // nachstellen — davor gibt es schlicht keine Daten.
+    const dataStartParam = params.get("start");
+    const hass = createMockHass({
+      scenario: opts.scenario,
+      now,
+      live: opts.live,
+      costMode: opts.cost,
+      ...(dataStartParam ? { dataStart: Date.parse(dataStartParam) } : {}),
+    });
+    hass.locale = { language: opts.lang };
+
+    // Bei fester Uhrzeit läuft die Karte auf der Mock-Uhr — sonst würde sie
+    // ein Zeitfenster zeichnen, für das der Mock gar keine Daten kennt.
+    if (fixed) Date.now = () => hass.getClock();
+
+    const cardConfig = {
+      type: "custom:energy-card",
+      title: "Pulse",
+      ...(opts.range ? { ranges: opts.range.split(",") } : {}),
+      ...(opts.level ? { default_level: opts.level } : {}),
+      ...(opts.range0 ? { default_range: opts.range0 } : {}),
+      view: opts.view,
+      compare: opts.compare,
+      show_minmax_band: opts.band,
+      show_today_tiles: opts.today,
+      show_cost_tiles: params.get("costtiles") === "1",
+    };
+
+    const card = document.createElement("energy-card");
+    card.setConfig(cardConfig);
+    card.hass = hass;
+    stage.appendChild(card);
+
+    hass.onUpdate = (next) => { card.hass = next; };
+
+    /* Schalter, die ohne Neuladen wirken — nur so lässt sich der Unterschied
+       im selben Zeitraum unmittelbar vergleichen. Der Weg über setConfig ist
+       derselbe, den auch der Karteneditor in Home Assistant geht. */
+    const addToggle = (title, key) => {
+      const label = document.createElement("span");
+      label.className = "group";
+      label.textContent = `${title}:`;
+      const button = document.createElement("button");
+      button.type = "button";
+      toolbar.append(label, button);
+
+      const paint = () => {
+        button.textContent = cardConfig[key] ? "an" : "aus";
+        button.classList.toggle("active", !!cardConfig[key]);
+      };
+      button.addEventListener("click", () => {
+        cardConfig[key] = !cardConfig[key];
+        card.setConfig({ ...cardConfig });
+        paint();
+      });
+      paint();
+    };
+
+    addToggle("Min/Max-Band", "show_minmax_band");
+    addToggle("Heute-Reihe", "show_today_tiles");
+    addToggle("Vergleich", "compare");
+    addToggle("Kostenkacheln", "show_cost_tiles");
+
+    // Für automatisierte Prüfungen aus dem Test-Skript heraus
+    window.__card = card;
+    window.__hass = hass;
+  </script>
+</body>
+</html>

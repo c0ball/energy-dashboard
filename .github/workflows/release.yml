@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Bündel bauen
+        run: npm run build
+
+      - name: Bündel prüfen
+        run: node --check dist/energy-card.js
+
+      # Die Version im Bündel soll dem Release-Tag entsprechen, damit die
+      # Konsolenzeile der Karte nicht etwas anderes behauptet als HACS anzeigt.
+      - name: Version gegen den Tag prüfen
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if ! grep -q "\"$TAG\"" dist/energy-card.js; then
+            echo "Version im Bündel passt nicht zum Tag $TAG."
+            echo "Bitte VERSION in energy-card/energy-card.js und"
+            echo "version in package.json auf $TAG setzen."
+            exit 1
+          fi
+
+      - name: An das Release hängen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/energy-card.js --clobber
